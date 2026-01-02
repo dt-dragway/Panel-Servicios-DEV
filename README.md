@@ -78,6 +78,37 @@ Genera el paquete:
 Bash
 
 dpkg-deb --build paquete dragwaysk-panel_1.0_all.deb
+
+## 🎥 Gestión de Shinobi CCTV
+
+El proyecto incluye scripts de gestión para el servicio de Shinobi usando PM2:
+
+### 🚀 Iniciar Shinobi
+```bash
+./start-shinobi.sh
+```
+Inicia el servicio de Shinobi usando PM2.
+
+### 🛑 Detener Shinobi
+```bash
+./stop-shinobi.sh
+```
+Detiene el servicio de Shinobi.
+
+### 🔄 Reiniciar Shinobi
+```bash
+./restart-shinobi.sh
+```
+Reinicia el servicio de Shinobi.
+
+### 📊 Ver Estado
+```bash
+./status-shinobi.sh
+```
+Muestra el estado detallado de Shinobi y los logs recientes.
+
+> **Nota:** Shinobi está configurado para ejecutarse desde `/home/dragwaysk/Shinobi`. Si tu instalación está en otra ubicación, ajusta la variable `SHINOBI_PATH` en `start-shinobi.sh`.
+
 📸 Capturas de Pantalla
 
 ![Interfaz del Dragwaysk Control Center](image/cap.png)

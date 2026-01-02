@@ -24,11 +24,26 @@ SERVICES_CONFIG = [
 ]
 
 class ServiceValidator:
-    """Valida y obtiene información de servicios systemd"""
+    """Valida y obtiene información de servicios systemd y PM2"""
     
     @staticmethod
     def service_exists(service_name):
-        """Verifica si un servicio existe en systemd"""
+        """Verifica si un servicio existe en systemd o PM2"""
+        # Caso especial para Shinobi (usa PM2)
+        if service_name == "shinobi":
+            try:
+                result = subprocess.run(
+                    ["pm2", "list"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                return "shinobi" in result.stdout
+            except Exception as e:
+                logging.error(f"Error verificando PM2 para {service_name}: {e}")
+                return False
+        
+        # Para otros servicios, usar systemd
         try:
             result = subprocess.run(
                 ["systemctl", "list-unit-files", service_name + ".service"],
@@ -44,6 +59,32 @@ class ServiceValidator:
     @staticmethod
     def get_service_status(service_name):
         """Obtiene el estado detallado de un servicio"""
+        # Caso especial para Shinobi (usa PM2)
+        if service_name == "shinobi":
+            try:
+                result = subprocess.run(
+                    ["pm2", "jlist"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                import json
+                processes = json.loads(result.stdout)
+                for proc in processes:
+                    if proc.get("name") == "shinobi":
+                        pm2_status = proc.get("pm2_env", {}).get("status")
+                        if pm2_status == "online":
+                            return "active"
+                        elif pm2_status == "stopped":
+                            return "inactive"
+                        else:
+                            return "failed"
+                return "inactive"
+            except Exception as e:
+                logging.error(f"Error obteniendo estado PM2 de {service_name}: {e}")
+                return "error"
+        
+        # Para otros servicios, usar systemd
         try:
             result = subprocess.run(
                 ["systemctl", "is-active", service_name],
@@ -68,56 +109,61 @@ class ServiceRow(Gtk.ListBoxRow):
         # Verificar si el servicio existe
         self.service_exists = ServiceValidator.service_exists(self.service_name)
         
-        # Contenedor horizontal
-        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
-        box.set_border_width(10)
+        # Contenedor principal con estilo de tarjeta
+        main_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        main_box.get_style_context().add_class("service-card")
         
-        # 1. Icono del servicio
+        # Contenedor horizontal interno
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=15)
+        box.set_margin_top(15)
+        box.set_margin_bottom(15)
+        box.set_margin_start(20)
+        box.set_margin_end(20)
+        
+        # 1. Icono del servicio con contenedor circular
+        icon_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        icon_box.set_size_request(48, 48)
+        icon_box.get_style_context().add_class("icon-container")
+        
         self.service_icon = Gtk.Image.new_from_icon_name(
             service_data["icon"], 
-            Gtk.IconSize.DIALOG
+            Gtk.IconSize.LARGE_TOOLBAR
         )
-        box.pack_start(self.service_icon, False, False, 0)
+        icon_box.pack_start(self.service_icon, True, True, 0)
+        box.pack_start(icon_box, False, False, 0)
         
         # 2. Contenedor de etiqueta y estado
-        label_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        label_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         
         self.label = Gtk.Label(label=service_data["label"], xalign=0)
-        self.label.set_markup(f"<b>{service_data['label']}</b>")
+        self.label.set_markup(f"<span size='large' weight='bold'>{service_data['label']}</span>")
         label_box.pack_start(self.label, False, False, 0)
         
         # Etiqueta de estado
         self.status_label = Gtk.Label(xalign=0)
-        self.status_label.set_markup("<small>Verificando...</small>")
+        self.status_label.set_markup("<span size='small' alpha='70%'>Verificando...</span>")
         label_box.pack_start(self.status_label, False, False, 0)
         
         box.pack_start(label_box, True, True, 0)
         
         # 3. Spinner de carga
         self.spinner = Gtk.Spinner()
-        box.pack_end(self.spinner, False, False, 5)
+        box.pack_end(self.spinner, False, False, 10)
         
-        # 4. El Switch
+        # 4. El Switch moderno
         self.switch = Gtk.Switch()
         self.switch.set_valign(Gtk.Align.CENTER)
         self.switch.connect("state-set", self.on_switch_activated)
         box.pack_end(self.switch, False, False, 0)
         
-        # 5. Indicador de estado (LED)
-        self.status_indicator = Gtk.Image.new_from_icon_name(
-            "dialog-question",
-            Gtk.IconSize.BUTTON
-        )
-        box.pack_end(self.status_indicator, False, False, 5)
-        
-        self.add(box)
+        main_box.pack_start(box, True, True, 0)
+        self.add(main_box)
         
         # Configurar tooltip y estado inicial
         if not self.service_exists:
             self.set_sensitive(False)
             self.set_tooltip_text(f"⚠️ El servicio '{self.service_name}' no está instalado en el sistema")
-            self.status_label.set_markup("<small><span foreground='red'>No disponible</span></small>")
-            self.status_indicator.set_from_icon_name("dialog-error", Gtk.IconSize.BUTTON)
+            self.status_label.set_markup("<span size='small' foreground='#ef5350'>● No disponible</span>")
             logging.warning(f"Servicio no encontrado: {self.service_name}")
         else:
             self.check_status()
@@ -144,17 +190,13 @@ class ServiceRow(Gtk.ListBoxRow):
     def update_visual_status(self, status):
         """Actualiza los indicadores visuales según el estado"""
         if status == "active":
-            self.status_label.set_markup("<small><span foreground='#4CAF50'>● Activo</span></small>")
-            self.status_indicator.set_from_icon_name("emblem-default", Gtk.IconSize.BUTTON)
+            self.status_label.set_markup("<span size='small' foreground='#66bb6a'>● Activo</span>")
         elif status == "inactive":
-            self.status_label.set_markup("<small><span foreground='#757575'>○ Inactivo</span></small>")
-            self.status_indicator.set_from_icon_name("process-stop", Gtk.IconSize.BUTTON)
+            self.status_label.set_markup("<span size='small' alpha='50%'>○ Inactivo</span>")
         elif status == "failed":
-            self.status_label.set_markup("<small><span foreground='#F44336'>✗ Fallido</span></small>")
-            self.status_indicator.set_from_icon_name("dialog-error", Gtk.IconSize.BUTTON)
+            self.status_label.set_markup("<span size='small' foreground='#ef5350'>✗ Fallido</span>")
         else:
-            self.status_label.set_markup("<small><span foreground='#FF9800'>? Desconocido</span></small>")
-            self.status_indicator.set_from_icon_name("dialog-question", Gtk.IconSize.BUTTON)
+            self.status_label.set_markup("<span size='small' foreground='#ffa726'>? Desconocido</span>")
 
     def on_switch_activated(self, switch, state):
         """Maneja el cambio de estado del switch"""
@@ -180,7 +222,12 @@ class ServiceRow(Gtk.ListBoxRow):
 
     def _perform_service_operation(self, action, desired_state):
         """Ejecuta la operación del servicio en un hilo separado"""
-        cmd = ["pkexec", "systemctl", action, self.service_name]
+        # Caso especial para Shinobi (usa PM2)
+        if self.service_name == "shinobi":
+            cmd = ["pm2", action, self.service_name]
+        else:
+            cmd = ["pkexec", "systemctl", action, self.service_name]
+        
         success = False
         error_msg = None
         
@@ -241,22 +288,42 @@ class ServiceRow(Gtk.ListBoxRow):
 class ControlPanelWindow(Gtk.Window):
     def __init__(self):
         super().__init__(title="Dragwaysk Control Center")
-        self.set_border_width(10)
-        self.set_default_size(450, 400)
+        self.set_border_width(0)
+        self.set_default_size(500, 650)
         self.set_position(Gtk.WindowPosition.CENTER)
+        self.set_resizable(False)
+        
+        # Activar modo oscuro
+        settings = Gtk.Settings.get_default()
+        settings.set_property("gtk-application-prefer-dark-theme", True)
         
         # Aplicar CSS personalizado
         self.apply_custom_css()
         
         # Layout Principal
-        vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.add(vbox)
         
-        # Título
+        # Header moderno
+        header_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        header_box.get_style_context().add_class("header-box")
+        header_box.set_margin_top(20)
+        header_box.set_margin_bottom(20)
+        header_box.set_margin_start(25)
+        header_box.set_margin_end(25)
+        
         header = Gtk.Label()
-        header.set_markup("<b><big>Gestor de Servicios Dev</big></b>")
-        header.set_margin_bottom(10)
-        vbox.pack_start(header, False, False, 0)
+        header.set_markup("<span size='xx-large' weight='bold'>Control Center</span>")
+        header.set_xalign(0)
+        header_box.pack_start(header, False, False, 0)
+        
+        subtitle = Gtk.Label()
+        subtitle.set_markup("<span size='small' alpha='60%'>Gestión de Servicios de Desarrollo</span>")
+        subtitle.set_xalign(0)
+        subtitle.set_margin_top(5)
+        header_box.pack_start(subtitle, False, False, 0)
+        
+        vbox.pack_start(header_box, False, False, 0)
         
         # Barra de información (para notificaciones)
         self.info_bar = Gtk.InfoBar()
@@ -270,11 +337,14 @@ class ControlPanelWindow(Gtk.Window):
         # ScrolledWindow para la lista de servicios
         scrolled = Gtk.ScrolledWindow()
         scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scrolled.set_margin_start(15)
+        scrolled.set_margin_end(15)
         vbox.pack_start(scrolled, True, True, 0)
 
         # Lista de Servicios
         self.listbox = Gtk.ListBox()
         self.listbox.set_selection_mode(Gtk.SelectionMode.NONE)
+        self.listbox.get_style_context().add_class("services-list")
         scrolled.add(self.listbox)
         
         # Almacenar referencias a las filas
@@ -287,34 +357,31 @@ class ControlPanelWindow(Gtk.Window):
             self.listbox.add(row)
 
         # Contenedor de botones
-        button_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=5)
-        button_box.set_margin_top(10)
+        button_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        button_box.set_margin_top(15)
+        button_box.set_margin_bottom(20)
+        button_box.set_margin_start(20)
+        button_box.set_margin_end(20)
         
         # Botón Refrescar
-        btn_refresh = Gtk.Button(label="🔄 Refrescar")
+        btn_refresh = Gtk.Button(label="Refrescar")
+        btn_refresh.get_style_context().add_class("flat")
         btn_refresh.connect("clicked", self.refresh_all)
         button_box.pack_start(btn_refresh, True, True, 0)
         
         # Botón Detener Todo
-        btn_stop_all = Gtk.Button(label="⏹️ Detener Todo")
+        btn_stop_all = Gtk.Button(label="Detener Todo")
         btn_stop_all.get_style_context().add_class("destructive-action")
         btn_stop_all.connect("clicked", self.stop_all)
         button_box.pack_start(btn_stop_all, True, True, 0)
         
         # Botón Activar Todo
-        btn_dev = Gtk.Button(label="🚀 Activar Todo")
+        btn_dev = Gtk.Button(label="Activar Todo")
         btn_dev.get_style_context().add_class("suggested-action")
         btn_dev.connect("clicked", self.activate_all)
         button_box.pack_start(btn_dev, True, True, 0)
         
         vbox.pack_end(button_box, False, False, 0)
-        
-        # Barra de estado
-        self.status_bar = Gtk.Label()
-        self.status_bar.set_markup("<small>Listo</small>")
-        self.status_bar.set_xalign(0)
-        self.status_bar.set_margin_top(5)
-        vbox.pack_end(self.status_bar, False, False, 0)
         
         # Actualización automática cada 5 segundos
         GLib.timeout_add_seconds(5, self.auto_refresh)
@@ -322,11 +389,106 @@ class ControlPanelWindow(Gtk.Window):
         logging.info("Panel de control iniciado")
 
     def apply_custom_css(self):
-        """Aplica estilos CSS personalizados"""
+        """Aplica estilos CSS personalizados para modo oscuro"""
         css_provider = Gtk.CssProvider()
         css = b"""
-        .service-row {
-            padding: 5px;
+        /* Fondo principal */
+        window {
+            background-color: #1e1e1e;
+        }
+        
+        /* Header */
+        .header-box {
+            background: linear-gradient(135deg, #1e1e1e 0%, #2d2d2d 100%);
+        }
+        
+        /* Lista de servicios */
+        .services-list {
+            background-color: transparent;
+        }
+        
+        .services-list row {
+            background-color: transparent;
+            border: none;
+        }
+        
+        /* Tarjetas de servicio */
+        .service-card {
+            background: linear-gradient(135deg, #2d2d2d 0%, #323232 100%);
+            border-radius: 12px;
+            margin: 6px 0;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            transition: all 200ms ease;
+        }
+        
+        .service-card:hover {
+            background: linear-gradient(135deg, #323232 0%, #383838 100%);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        /* Contenedor de icono */
+        .icon-container {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 10px;
+            padding: 8px;
+        }
+        
+        /* Textos */
+        label {
+            color: #e8e8e8;
+        }
+        
+        /* Botones */
+        button {
+            border-radius: 8px;
+            padding: 10px 20px;
+            font-weight: 600;
+            min-height: 40px;
+            transition: all 200ms ease;
+        }
+        
+        button.flat {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: #e8e8e8;
+        }
+        
+        button.flat:hover {
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+        }
+        
+        button.suggested-action {
+            background: linear-gradient(135deg, #66bb6a 0%, #4caf50 100%);
+            border: none;
+            color: white;
+            box-shadow: 0 2px 8px rgba(76, 175, 80, 0.3);
+        }
+        
+        button.suggested-action:hover {
+            background: linear-gradient(135deg, #5cb860 0%, #43a047 100%);
+            box-shadow: 0 4px 12px rgba(76, 175, 80, 0.4);
+        }
+        
+        button.destructive-action {
+            background: linear-gradient(135deg, #ef5350 0%, #e53935 100%);
+            border: none;
+            color: white;
+            box-shadow: 0 2px 8px rgba(239, 83, 80, 0.3);
+        }
+        
+        button.destructive-action:hover {
+            background: linear-gradient(135deg, #e64a4a 0%, #d32f2f 100%);
+            box-shadow: 0 4px 12px rgba(239, 83, 80, 0.4);
+        }
+        
+        /* Switch moderno */
+        switch {
+            border-radius: 14px;
+        }
+        
+        switch slider {
+            border-radius: 12px;
         }
         """
         css_provider.load_from_data(css)
@@ -341,10 +503,6 @@ class ControlPanelWindow(Gtk.Window):
         self.info_label.set_text(message)
         self.info_bar.set_message_type(msg_type)
         self.info_bar.set_revealed(True)
-        
-        # Actualizar barra de estado
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        self.status_bar.set_markup(f"<small>{timestamp} - {message}</small>")
         
         # Auto-ocultar después de 5 segundos
         GLib.timeout_add_seconds(5, lambda: self.info_bar.set_revealed(False))
@@ -380,10 +538,25 @@ class ControlPanelWindow(Gtk.Window):
         
         def run_activation():
             try:
-                subprocess.run(
-                    ["pkexec", "systemctl", "start"] + available_services,
-                    timeout=60
-                )
+                # Separar servicios systemd de PM2
+                systemd_services = [s for s in available_services if s != "shinobi"]
+                pm2_services = [s for s in available_services if s == "shinobi"]
+                
+                # Iniciar servicios systemd
+                if systemd_services:
+                    subprocess.run(
+                        ["pkexec", "systemctl", "start"] + systemd_services,
+                        timeout=60
+                    )
+                
+                # Iniciar servicios PM2 (Shinobi)
+                if pm2_services:
+                    for service in pm2_services:
+                        subprocess.run(
+                            ["pm2", "start", service],
+                            timeout=30
+                        )
+                
                 GLib.idle_add(self.show_notification, "✓ Todos los servicios activados", Gtk.MessageType.INFO)
                 GLib.idle_add(self.refresh_all)
             except Exception as e:
@@ -426,10 +599,25 @@ class ControlPanelWindow(Gtk.Window):
         
         def run_stop():
             try:
-                subprocess.run(
-                    ["pkexec", "systemctl", "stop"] + available_services,
-                    timeout=60
-                )
+                # Separar servicios systemd de PM2
+                systemd_services = [s for s in available_services if s != "shinobi"]
+                pm2_services = [s for s in available_services if s == "shinobi"]
+                
+                # Detener servicios systemd
+                if systemd_services:
+                    subprocess.run(
+                        ["pkexec", "systemctl", "stop"] + systemd_services,
+                        timeout=60
+                    )
+                
+                # Detener servicios PM2 (Shinobi)
+                if pm2_services:
+                    for service in pm2_services:
+                        subprocess.run(
+                            ["pm2", "stop", service],
+                            timeout=30
+                        )
+                
                 GLib.idle_add(self.show_notification, "✓ Todos los servicios detenidos", Gtk.MessageType.INFO)
                 GLib.idle_add(self.refresh_all)
             except Exception as e:
