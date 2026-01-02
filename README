@@ -80,7 +80,7 @@ Bash
 dpkg-deb --build paquete dragwaysk-panel_1.0_all.deb
 📸 Capturas de Pantalla
 
-![Interfaz del Dragwaysk Control Center](/home/dragwaysk/.gemini/antigravity/brain/907f901a-b0ff-46be-b25d-e8acc58a4f83/uploaded_image_1767377065555.png)
+![Interfaz del Dragwaysk Control Center](image/cap.png)
 
 **Características visibles:**
 - ✅ Validación de servicios (Shinobi CCTV aparece como "No disponible")
