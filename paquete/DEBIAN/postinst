@@ -1,0 +1,15 @@
+#!/bin/bash
+# Post-installation script
+
+# Hacer ejecutable el script principal
+chmod +x /usr/bin/dragwaysk-panel
+
+# Actualizar base de datos de aplicaciones
+if command -v update-desktop-database &> /dev/null; then
+    update-desktop-database /usr/share/applications
+fi
+
+echo "Dragwaysk Control Center instalado correctamente."
+echo "Puedes ejecutarlo desde el menú de aplicaciones o con: dragwaysk-panel"
+
+exit 0

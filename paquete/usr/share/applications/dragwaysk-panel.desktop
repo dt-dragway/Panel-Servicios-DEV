@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Dragwaysk Control Center
+Comment=Gestor gráfico de servicios systemd para desarrollo
+Exec=dragwaysk-panel
+Icon=applications-system
+Terminal=false
+Categories=System;Settings;
+Keywords=systemd;services;docker;postgresql;mariadb;dev;
+StartupNotify=true
