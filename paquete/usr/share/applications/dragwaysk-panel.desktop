@@ -1,11 +1,12 @@
 [Desktop Entry]
-Version=1.0
+Version=2.1
 Type=Application
 Name=Dragwaysk Control Center
-Comment=Gestor gráfico de servicios systemd para desarrollo
+Comment=Gestor gráfico de servicios systemd y PM2 para desarrollo
 Exec=dragwaysk-panel
 Icon=applications-system
 Terminal=false
 Categories=System;Settings;
-Keywords=systemd;services;docker;postgresql;mariadb;dev;
+Keywords=systemd;services;docker;postgresql;mariadb;shinobi;pm2;cctv;dev;
 StartupNotify=true
+
